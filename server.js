@@ -247,6 +247,7 @@ app.get('/download-secao', (req, res) => {
     });
 });
 
+// [4] Limpeza das tabelas
 app.post('/admin/limpar-tabelas', (req, res) => {
     db.serialize(() => {
         db.run("DELETE FROM fotos");
