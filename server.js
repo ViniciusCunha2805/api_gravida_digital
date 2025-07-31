@@ -93,6 +93,7 @@ app.get('/api/dados', (req, res) => {
 app.post('/api/enviar-dados', (req, res) => {
     const { id_usuario, id_secao, respostas, fotos, nome, email } = req.body;
 
+    //Validação básica
     if (!id_usuario || !id_secao) {
         return res.status(400).json({ error: "id_usuario ou id_secao ausente" });
     }
@@ -102,6 +103,7 @@ app.post('/api/enviar-dados', (req, res) => {
             db.run("BEGIN TRANSACTION");
 
             db.run(
+                //Insere/atualiza usuário
                 `INSERT OR REPLACE INTO usuarios (id, nome, email) VALUES (?, ?, ?)`,
                 [id_usuario, nome || '', email || ''],
                 (err) => {
@@ -114,6 +116,7 @@ app.post('/api/enviar-dados', (req, res) => {
                     const dataLocal = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
                     db.run(
+                        //Insere seção
                         `INSERT INTO secoes (id_secao, id_usuario, data_realizacao) VALUES (?, ?, ?)`,
                         [id_secao, id_usuario, dataLocal],
                         (err) => {
@@ -123,6 +126,7 @@ app.post('/api/enviar-dados', (req, res) => {
                                 return res.status(500).json({ error: "Erro ao salvar seção" });
                             }
 
+                            // Insere respostas (se houver)
                             if (respostas && respostas.length > 0) {
                                 const stmt = db.prepare(`
                                     INSERT INTO respostas (id_usuario, id_secao, pergunta_num, valor_resposta)
@@ -134,6 +138,7 @@ app.post('/api/enviar-dados', (req, res) => {
                                 stmt.finalize();
                             }
 
+                            // Insere fotos (se houver)
                             if (fotos && fotos.length > 0) {
                                 const pastaUploads = path.join(__dirname, 'uploads');
                                 if (!fs.existsSync(pastaUploads)) fs.mkdirSync(pastaUploads);
@@ -158,7 +163,7 @@ app.post('/api/enviar-dados', (req, res) => {
                                 stmt.finalize();
                             }
 
-                            db.run("COMMIT");
+                            db.run("COMMIT"); //Finaliza a transação
                             res.json({ success: true, message: "Dados salvos com sucesso!" });
                         }
                     );
@@ -177,6 +182,7 @@ app.get('/download-secao', (req, res) => {
     if (!secao) return res.status(400).send("Parâmetro 'secao' ausente");
 
     db.serialize(() => {
+        // Busca dados do usuário e seção
         db.get(`
             SELECT u.id as id_usuario, u.nome, u.email, s.data_realizacao
             FROM usuarios u
@@ -187,6 +193,7 @@ app.get('/download-secao', (req, res) => {
                 return res.status(500).json({ error: "Erro ao buscar usuário/seção" });
             }
 
+            //Busca respostas da seção
             db.all(`
                 SELECT pergunta_num, valor_resposta 
                 FROM respostas 
@@ -195,6 +202,7 @@ app.get('/download-secao', (req, res) => {
             `, [secao], (err, respostas) => {
                 if (err) return res.status(500).json({ error: err.message });
 
+                //Busca fotos da seção
                 db.all(`
                     SELECT caminho 
                     FROM fotos 
@@ -202,11 +210,13 @@ app.get('/download-secao', (req, res) => {
                 `, [secao], (err, fotos) => {
                     if (err) return res.status(500).json({ error: err.message });
 
+                    //Cria o arquivo ZIP e define o nome
                     const zip = archiver('zip');
                     const nomeZip = `respostas_fotos_secao${secao.padStart(5, '0')}.zip`;
                     res.attachment(nomeZip);
                     zip.pipe(res);
 
+                    //Add um JSON com as respostas
                     const jsonContent = {
                         secao: parseInt(secao),
                         id_usuario: usuario.id_usuario,
@@ -221,6 +231,7 @@ app.get('/download-secao', (req, res) => {
                         name: `respostas_secao${secao}.json`
                     });
 
+                    //Add as fotos ao ZIP
                     fotos.forEach((foto) => {
                         const filePath = path.join(__dirname, foto.caminho);
                         if (fs.existsSync(filePath)) {
@@ -229,6 +240,7 @@ app.get('/download-secao', (req, res) => {
                         }
                     });
 
+                    //Add um arquivo de instruções (README)
                     zip.append(
                         `RELATÓRIO DA SEÇÃO ${secao}\n\n` +
                         `Data de geração: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\n` +
@@ -240,21 +252,22 @@ app.get('/download-secao', (req, res) => {
                         { name: 'LEIA-ME.txt' }
                     );
 
-                    zip.finalize();
+                    zip.finalize(); //Finaliza o ZIP
                 });
             });
         });
     });
 });
 
-// [4] Limpeza das tabelas
+// [4] Limpeza das tabelas do front
 app.post('/admin/limpar-tabelas', (req, res) => {
     db.serialize(() => {
         db.run("DELETE FROM fotos");
         db.run("DELETE FROM respostas");
         db.run("DELETE FROM secoes");
-        db.run("DELETE FROM usuarios");s
+        db.run("DELETE FROM usuarios");
 
+        //Deleta arquivos da pasta de upload
         const pastaUploads = path.join(__dirname, 'uploads');
         fs.readdir(pastaUploads, (err, files) => {
             if (!err && files.length > 0) {
